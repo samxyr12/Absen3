@@ -323,7 +323,9 @@ body.dark .btn-export {
     <div class="loading-overlay" id="loadingOverlay">
         <div class="spinner"></div>
     </div>
-
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script>       
         
 let html5QrcodeScanner;
@@ -659,10 +661,22 @@ document.getElementById('checkOut').addEventListener('click', () => {
 
 document.getElementById('exportData').addEventListener('click', async () => {
     try {
+        // Tampilkan modal pilihan ekspor
+        const { value: exportType } = await Swal.fire({
+            title: 'Pilih Jenis Ekspor',
+            text: 'Pilih format file yang ingin Anda ekspor',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Excel',
+            cancelButtonText: 'ZIP',
+            confirmButtonColor: '#3085d6',
+            cancelButtonColor: '#d33',
+        });
+
         showLoading();
         const attendance = LocalStorage.getAttendance();
         
-        // Flatten the attendance data for Excel
+        // Flatten the attendance data
         const flattenedData = [];
         Object.entries(attendance).forEach(([ktp, userAttendance]) => {
             Object.entries(userAttendance).forEach(([date, dayAttendance]) => {
@@ -690,51 +704,108 @@ document.getElementById('exportData').addEventListener('click', async () => {
                 }
             });
         });
-        
-        // Create workbook and add data
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.json_to_sheet(flattenedData);
-        
-        // Set column widths
-        const colWidths = [
-            { wch: 20 }, // KTP
-            { wch: 25 }, // Nama
-            { wch: 15 }, // Tanggal
-            { wch: 10 }, // Mode
-            { wch: 20 }, // Waktu
-            { wch: 30 }, // Lokasi
-            { wch: 10 }, // Terlambat/Lembur
-        ];
-        ws['!cols'] = colWidths;
-        
-        // Add style to header
-        const range = XLSX.utils.decode_range(ws['!ref']);
-        for (let C = range.s.c; C <= range.e.c; ++C) {
-            const address = XLSX.utils.encode_col(C) + "1";
-            if (!ws[address]) continue;
-            ws[address].s = {
-                font: { bold: true },
-                fill: { fgColor: { rgb: "CCCCCC" } },
-                alignment: { horizontal: "center" }
-            };
+
+        // Tentukan nama file
+        const currentDate = new Date().toISOString().split('T')[0];
+        const fileName = `attendance_data_${currentDate}`;
+
+        if (exportType) {
+            // Ekspor Excel
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.json_to_sheet(flattenedData);
+            
+            // Set column widths
+            const colWidths = [
+                { wch: 20 }, // KTP
+                { wch: 25 }, // Nama
+                { wch: 15 }, // Tanggal
+                { wch: 10 }, // Mode
+                { wch: 20 }, // Waktu
+                { wch: 30 }, // Lokasi
+                { wch: 10 }, // Terlambat/Lembur
+            ];
+            ws['!cols'] = colWidths;
+            
+            // Add style to header
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const address = XLSX.utils.encode_col(C) + "1";
+                if (!ws[address]) continue;
+                ws[address].s = {
+                    font: { bold: true },
+                    fill: { fgColor: { rgb: "CCCCCC" } },
+                    alignment: { horizontal: "center" }
+                };
+            }
+            
+            XLSX.utils.book_append_sheet(wb, ws, "Data Absensi");
+            
+            // Create summary sheet
+            const summaryData = calculateSummary(attendance);
+            const summaryWs = XLSX.utils.json_to_sheet(summaryData);
+            XLSX.utils.book_append_sheet(wb, summaryWs, "Ringkasan");
+            
+            // Save workbook to file
+            XLSX.writeFile(wb, `${fileName}.xlsx`);
+
+            Swal.fire({
+                icon: 'success',
+                title: 'Ekspor Excel Berhasil',
+                text: `Data telah diekspor ke ${fileName}.xlsx`
+            });
+        } else {
+            // Ekspor ZIP
+            const zip = new JSZip();
+
+            // Buat file Excel dengan format yang sama seperti ekspor Excel langsung
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.json_to_sheet(flattenedData);
+            
+            // Set column widths
+            const colWidths = [
+                { wch: 20 }, // KTP
+                { wch: 25 }, // Nama
+                { wch: 15 }, // Tanggal
+                { wch: 10 }, // Mode
+                { wch: 20 }, // Waktu
+                { wch: 30 }, // Lokasi
+                { wch: 10 }, // Terlambat/Lembur
+            ];
+            ws['!cols'] = colWidths;
+            
+            // Add style to header
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const address = XLSX.utils.encode_col(C) + "1";
+                if (!ws[address]) continue;
+                ws[address].s = {
+                    font: { bold: true },
+                    fill: { fgColor: { rgb: "CCCCCC" } },
+                    alignment: { horizontal: "center" }
+                };
+            }
+            
+            XLSX.utils.book_append_sheet(wb, ws, "Data Absensi");
+            
+            // Create summary sheet
+            const summaryData = calculateSummary(attendance);
+            const summaryWs = XLSX.utils.json_to_sheet(summaryData);
+            XLSX.utils.book_append_sheet(wb, summaryWs, "Ringkasan");
+
+            // Tambahkan file Excel ke ZIP
+            const excelBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+            zip.file(`${fileName}.xlsx`, excelBuffer);
+
+            // Generate ZIP
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            saveAs(zipBlob, `${fileName}.zip`);
+
+            Swal.fire({
+                icon: 'success',
+                title: 'Ekspor ZIP Berhasil',
+                text: `Data telah diekspor ke ${fileName}.zip`
+            });
         }
-        
-        XLSX.utils.book_append_sheet(wb, ws, "Data Absensi");
-        
-        // Create summary sheet
-        const summaryData = calculateSummary(attendance);
-        const summaryWs = XLSX.utils.json_to_sheet(summaryData);
-        XLSX.utils.book_append_sheet(wb, summaryWs, "Ringkasan");
-        
-        // Save workbook to file
-        const fileName = `attendance_data_${new Date().toISOString().split('T')[0]}.xlsx`;
-        XLSX.writeFile(wb, fileName);
-        
-        Swal.fire({
-            icon: 'success',
-            title: 'Ekspor Berhasil',
-            text: `Data telah diekspor ke ${fileName}`
-        });
     } catch (error) {
         console.error('Export error:', error);
         Swal.fire({
@@ -746,8 +817,6 @@ document.getElementById('exportData').addEventListener('click', async () => {
         hideLoading();
     }
 });
-
-
 
 
 function calculateSummary(attendance) {
